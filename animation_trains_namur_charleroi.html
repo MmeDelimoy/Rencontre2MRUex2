@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rencontre de deux trains - Namur & Charleroi</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      padding: 16px 20px 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .track-container {
+      position: relative;
+      margin-top: 10px;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: #fafafa;
+      padding: 10px;
+    }
+    #trackCanvas, #graphCanvas {
+      display: block;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+    }
+    .labels {
+      display: flex;
+      justify-content: space-between;
+      margin: 0 30px 5px 30px;
+      font-weight: bold;
+    }
+    .labels span {
+      min-width: 80px;
+      text-align: center;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      margin-bottom: 8px;
+    }
+    button {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #888;
+      background: #f0f0f0;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:hover {
+      background: #e0e0e0;
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    .info-box {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #f9fafb;
+      border: 1px solid #e0e0e0;
+      font-size: 0.9rem;
+    }
+    .info-box h2 {
+      font-size: 1rem;
+      margin: 0 0 4px 0;
+    }
+    .equations {
+      font-family: "Consolas", "Fira Code", monospace;
+      font-size: 0.9rem;
+      white-space: pre-line;
+    }
+    .small-note {
+      font-size: 0.8rem;
+      color: #555;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Rencontre de deux trains : Namur & Charleroi</h1>
+
+  <!-- Ligne de train -->
+  <div class="track-container">
+    <div class="labels">
+      <span>Charleroi</span>
+      <span>Namur</span>
+    </div>
+    <canvas id="trackCanvas" width="800" height="150"></canvas>
+  </div>
+
+  <!-- Boutons de contrôle -->
+  <div class="controls">
+    <button id="axisButton">Changer de repère</button>
+    <button id="playButton">▶️ Play</button>
+    <button id="pauseButton">⏸️ Pause</button>
+    <button id="resetButton">🔄 Reset</button>
+    <button id="graphButton">📈 Générer le graphe complet</button>
+  </div>
+
+  <!-- Infos sur le repère et les équations -->
+  <div class="info-box">
+    <h2>Repère choisi</h2>
+    <div id="repereDescription"></div>
+    <div class="small-note">
+      On note <strong>t</strong> en heures, avec <strong>t = 0</strong> correspondant à 8h00.
+    </div>
+    <h2>Équations des mouvements (en fonction du repère choisi)</h2>
+    <div id="equations" class="equations"></div>
+  </div>
+
+  <!-- Graphique x(t) -->
+  <div style="margin-top:14px;">
+    <canvas id="graphCanvas" width="800" height="260"></canvas>
+    <div class="small-note">
+      Axe horizontal : temps t (en heures, de 8h00 à environ 8h30).<br>
+      Axe vertical : abscisse x(t) des trains dans le repère choisi (en km).
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+  Modèle physique :
+  - Distance Namur–Charleroi : 40 km.
+  - T1 part de Namur à 8h00, vitesse +60 km/h (vers Charleroi).
+  - T2 part de Charleroi à 8h10 (t = 1/6 h), vitesse 90 km/h vers Namur.
+  On prend t en heures, t = 0 à 8h00.
+  Position "physique" s(t) mesurée en km, origine Namur, axe vers Charleroi.
+*/
+
+// Constantes physiques
+const DIST_TOTAL = 40;       // km
+const V1 = 60;               // km/h (T1)
+const V2 = 90;               // km/h (T2)
+const T2_DEPART = 1/6;       // 10 min = 1/6 h
+const T_MAX = 0.5;           // 0.5 h = 30 min pour le graphe
+
+// Repères possibles : x = a * s + b
+const repereOptions = [
+  {
+    name: "Origine à Namur, axe orienté vers Charleroi, unité en km.",
+    a: 1,
+    b: 0,
+    description:
+      "Origine au niveau de Namur (x = 0), axe dirigé vers Charleroi.\n" +
+      "Namur : x = 0 km, Charleroi : x = 40 km."
+  },
+  {
+    name: "Origine à Charleroi, axe orienté vers Namur, unité en km.",
+    a: -1,
+    b: DIST_TOTAL,
+    description:
+      "Origine au niveau de Charleroi (x = 0), axe dirigé vers Namur.\n" +
+      "Charleroi : x = 0 km, Namur : x = 40 km."
+  },
+  {
+    name: "Origine au milieu de la ligne, axe orienté vers Namur.",
+    a: -1,
+    b: DIST_TOTAL / 2,
+    description:
+      "Origine au milieu de la ligne Namur–Charleroi (x = 0), axe dirigé vers Namur.\n" +
+      "Milieu : x = 0 km, Namur : x = 20 km, Charleroi : x = -20 km."
+  }
+];
+
+let currentRepereIndex = 0;
+
+// Éléments du DOM
+const trackCanvas = document.getElementById("trackCanvas");
+const trackCtx = trackCanvas.getContext("2d");
+const graphCanvas = document.getElementById("graphCanvas");
+const graphCtx = graphCanvas.getContext("2d");
+
+const axisButton = document.getElementById("axisButton");
+const playButton = document.getElementById("playButton");
+const pauseButton = document.getElementById("pauseButton");
+const resetButton = document.getElementById("resetButton");
+const graphButton = document.getElementById("graphButton");
+const repereDescriptionDiv = document.getElementById("repereDescription");
+const equationsDiv = document.getElementById("equations");
+
+// Animation
+let running = false;
+let lastTimestamp = null;
+let simTime = 0;          // temps simulé en heures depuis 8h00
+let speedFactor = 80;     // facteur d'accélération (1 s réelle = 80 s simulées)
+
+// Historique pour le graphe dynamique
+let pointsT1 = [];
+let pointsT2 = [];
+
+// Fonctions de modèle : positions physiques s(t) en km
+function s1(t) {
+  // T1 part à t=0 de Namur (s=0) vers Charleroi
+  return V1 * t;
+}
+function s2(t) {
+  // T2 reste à Charleroi (s=40) jusqu'à t = T2_DEPART
+  // puis revient vers Namur à 90 km/h
+  if (t < T2_DEPART) {
+    return DIST_TOTAL;
+  } else {
+    return DIST_TOTAL - V2 * (t - T2_DEPART);
+  }
+}
+
+// Passage au repère courant : x = a * s + b
+function toRepere(s) {
+  const rep = repereOptions[currentRepereIndex];
+  return rep.a * s + rep.b;
+}
+
+// Formattage des équations pour affichage
+function updateEquationsDisplay() {
+  const rep = repereOptions[currentRepereIndex];
+  const a = rep.a;
+  const b = rep.b;
+
+  // T1 : s1(t) = 60 t => x1(t) = a * 60 t + b
+  const a1 = a * V1;
+  const b1 = b;
+
+  // T2 :
+  // - pour 0 <= t < 1/6 : s2(t) = 40 => x2(t) = a*40 + b
+  const x2_const = a * DIST_TOTAL + b;
+  // - pour t >= 1/6 : s2(t) = 40 - 90 (t - 1/6)
+  //   => s2(t) = 55 - 90 t
+  //   => x2(t) = a*(55 - 90t) + b = (-90a) t + (55a + b)
+  const a2 = -V2 * a;
+  const c2 = 55 * a + b;
+
+  function formatLinear(coeffT, constant) {
+    // Forme "A t + B" propre
+    const A = Math.round(coeffT * 100) / 100;
+    const B = Math.round(constant * 100) / 100;
+    let str = "";
+    if (A === 0) {
+      str = B.toString();
+    } else {
+      if (A === 1) str = "t";
+      else if (A === -1) str = "-t";
+      else str = A + " t";
+      if (B > 0) str += " + " + B;
+      else if (B < 0) str += " " + B; // B est déjà négatif
+    }
+    return str;
+  }
+
+  const eq1 = "Train T₁ (Namur → Charleroi)\n" +
+              "x₁(t) = " + formatLinear(a1, b1) + "   (t en heures, t ≥ 0)\n\n";
+
+  const eq2 = "Train T₂ (Charleroi → Namur)\n" +
+              "Pour 0 ≤ t < 1/6 h  :  x₂(t) = " + (Math.round(x2_const * 100) / 100) + "\n" +
+              "Pour t ≥ 1/6 h      :  x₂(t) = " + formatLinear(a2, c2) + "\n";
+
+  equationsDiv.textContent = eq1 + eq2;
+  repereDescriptionDiv.textContent = rep.description;
+}
+
+// Dessin de la ligne de train et des trains
+function drawTrackScene() {
+  const ctx = trackCtx;
+  ctx.clearRect(0, 0, trackCanvas.width, trackCanvas.height);
+
+  const padding = 40;
+  const yTrack = trackCanvas.height / 2;
+  const xCharleroi = padding;
+  const xNamur = trackCanvas.width - padding;
+
+  // Ligne de chemin de fer
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#555";
+  ctx.beginPath();
+  ctx.moveTo(xCharleroi, yTrack);
+  ctx.lineTo(xNamur, yTrack);
+  ctx.stroke();
+
+  // Petites traverses
+  ctx.lineWidth = 1.5;
+  const nbTraverses = 20;
+  for (let i = 0; i <= nbTraverses; i++) {
+    const x = xCharleroi + (xNamur - xCharleroi) * (i / nbTraverses);
+    ctx.beginPath();
+    ctx.moveTo(x, yTrack - 8);
+    ctx.lineTo(x, yTrack + 8);
+    ctx.stroke();
+  }
+
+  // Position des trains à l'instant simTime
+  const t = simTime;
+  let s1Pos = s1(t);
+  let s2Pos = s2(t);
+
+  // On limite l'affichage entre 0 et DIST_TOTAL pour ne pas sortir de la voie
+  s1Pos = Math.max(0, Math.min(DIST_TOTAL, s1Pos));
+  s2Pos = Math.max(0, Math.min(DIST_TOTAL, s2Pos));
+
+  // Conversion position physique -> pixel (Namur à droite, Charleroi à gauche)
+  function sToXpixel(s) {
+    const ratio = s / DIST_TOTAL;
+    return xCharleroi + (xNamur - xCharleroi) * ratio;
+  }
+
+  const xTrain1 = sToXpixel(s1Pos);
+  const xTrain2 = sToXpixel(s2Pos);
+  const yTrain1 = yTrack - 20;
+  const yTrain2 = yTrack + 20;
+
+  // Dessin des trains (rectangles + petite “locomotive”)
+  function drawTrain(x, y, directionToRight, color) {
+    const width = 40;
+    const height = 16;
+
+    trackCtx.fillStyle = color;
+    trackCtx.fillRect(x - width / 2, y - height / 2, width, height);
+
+    // petite "face" de la loco
+    trackCtx.beginPath();
+    if (directionToRight) {
+      trackCtx.moveTo(x + width / 2, y - height / 2);
+      trackCtx.lineTo(x + width / 2 + 8, y);
+      trackCtx.lineTo(x + width / 2, y + height / 2);
+    } else {
+      trackCtx.moveTo(x - width / 2, y - height / 2);
+      trackCtx.lineTo(x - width / 2 - 8, y);
+      trackCtx.lineTo(x - width / 2, y + height / 2);
+    }
+    trackCtx.closePath();
+    trackCtx.fill();
+
+    // roues
+    trackCtx.fillStyle = "#222";
+    trackCtx.beginPath();
+    trackCtx.arc(x - width / 4, y + height / 2, 3, 0, Math.PI * 2);
+    trackCtx.arc(x + width / 4, y + height / 2, 3, 0, Math.PI * 2);
+    trackCtx.fill();
+
+    // Point ponctuel sur le train
+    trackCtx.fillStyle = "#000";
+    trackCtx.beginPath();
+    trackCtx.arc(x, y, 3, 0, Math.PI * 2);
+    trackCtx.fill();
+  }
+
+  // T1 va de Namur (droite) vers Charleroi (gauche) => directionToRight = false
+  drawTrain(xTrain1, yTrain1, false, "#4a90e2");
+
+  // T2 va de Charleroi (gauche) vers Namur (droite) => directionToRight = true
+  drawTrain(xTrain2, yTrain2, true, "#e94e77");
+
+  // Représentation ponctuelle (un petit point au-dessus)
+  trackCtx.fillStyle = "#000";
+  trackCtx.beginPath();
+  trackCtx.arc(xTrain1, yTrain1 - 10, 3, 0, Math.PI * 2);
+  trackCtx.fill();
+
+  trackCtx.beginPath();
+  trackCtx.arc(xTrain2, yTrain2 + 10, 3, 0, Math.PI * 2);
+  trackCtx.fill();
+}
+
+// Dessin des axes et du graphe
+function drawGraphAxes() {
+  const ctx = graphCtx;
+  ctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
+
+  const paddingLeft = 60;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 40;
+
+  const x0 = paddingLeft;
+  const y0 = graphCanvas.height - paddingBottom;
+  const width = graphCanvas.width - paddingLeft - paddingRight;
+  const height = graphCanvas.height - paddingTop - paddingBottom;
+
+  // Cadre
+  ctx.strokeStyle = "#bbb";
+  ctx.strokeRect(x0, paddingTop, width, height);
+
+  // Axes
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1.2;
+
+  // Axe du temps (horizontal)
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0 + width, y0);
+  ctx.stroke();
+
+  // Axe des positions (vertical)
+  ctx.beginPath();
+  ctx.moveTo(x0, paddingTop);
+  ctx.lineTo(x0, paddingTop + height);
+  ctx.stroke();
+
+  // Graduation en temps : 0 à T_MAX (0.5 h)
+  ctx.fillStyle = "#000";
+  ctx.font = "12px system-ui";
+  const nTicksT = 5;
+  for (let i = 0; i <= nTicksT; i++) {
+    const t = (T_MAX * i) / nTicksT;
+    const x = x0 + (t / T_MAX) * width;
+    ctx.beginPath();
+    ctx.moveTo(x, y0 - 4);
+    ctx.lineTo(x, y0 + 4);
+    ctx.stroke();
+
+    const label = t.toFixed(2);
+    ctx.fillText(label, x - 10, y0 + 16);
+  }
+  ctx.fillText("t (h)", x0 + width - 30, y0 + 30);
+
+  // Graduation en position x (en km)
+  // On prend une plage un peu plus large que [0, 40] pour montrer les changements de repère
+  const yMin = -25;
+  const yMax = 45;
+  const nTicksX = 7;
+  for (let i = 0; i <= nTicksX; i++) {
+    const xVal = yMin + ((yMax - yMin) * i) / nTicksX;
+    const y = paddingTop + height - ((xVal - yMin) / (yMax - yMin)) * height;
+
+    ctx.beginPath();
+    ctx.moveTo(x0 - 4, y);
+    ctx.lineTo(x0 + 4, y);
+    ctx.stroke();
+
+    ctx.fillText(Math.round(xVal), x0 - 40, y + 3);
+  }
+  ctx.save();
+  ctx.translate(x0 - 50, paddingTop + 10);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("x (km)", 0, 0);
+  ctx.restore();
+
+  // On sauvegarde ces paramètres pour réutilisation dans le tracé
+  graphAxesInfo = { x0, y0, width, height, yMin, yMax };
+}
+
+// Variable globale pour axes du graphe
+let graphAxesInfo = null;
+
+function tToXPixel(t) {
+  const { x0, width } = graphAxesInfo;
+  return x0 + (t / T_MAX) * width;
+}
+function xToYPixel(xVal) {
+  const { y0, height, yMin, yMax } = graphAxesInfo;
+  return y0 - ((xVal - yMin) / (yMax - yMin)) * height;
+}
+
+// Dessine les points accumulés (trajectoires partielles)
+function drawGraphPoints() {
+  const ctx = graphCtx;
+  if (!graphAxesInfo) return;
+
+  // Courbe T1
+  if (pointsT1.length > 1) {
+    ctx.strokeStyle = "#4a90e2";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < pointsT1.length; i++) {
+      const p = pointsT1[i];
+      const xPix = tToXPixel(p.t);
+      const yPix = xToYPixel(toRepere(p.s));
+      if (i === 0) ctx.moveTo(xPix, yPix);
+      else ctx.lineTo(xPix, yPix);
+    }
+    ctx.stroke();
+  }
+
+  // Courbe T2
+  if (pointsT2.length > 1) {
+    ctx.strokeStyle = "#e94e77";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < pointsT2.length; i++) {
+      const p = pointsT2[i];
+      const xPix = tToXPixel(p.t);
+      const yPix = xToYPixel(toRepere(p.s));
+      if (i === 0) ctx.moveTo(xPix, yPix);
+      else ctx.lineTo(xPix, yPix);
+    }
+    ctx.stroke();
+  }
+}
+
+// Génère les trajectoires complètes sur le graphe
+function drawFullGraph() {
+  drawGraphAxes();
+
+  const dt = 0.005; // pas de temps pour le tracé (en heures)
+  const traj1 = [];
+  const traj2 = [];
+
+  for (let t = 0; t <= T_MAX + 1e-6; t += dt) {
+    traj1.push({ t: t, s: s1(t) });
+    traj2.push({ t: t, s: s2(t) });
+  }
+
+  const ctx = graphCtx;
+
+  // T1 complet
+  ctx.strokeStyle = "#4a90e2";
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  traj1.forEach((p, i) => {
+    const xPix = tToXPixel(p.t);
+    const yPix = xToYPixel(toRepere(p.s));
+    if (i === 0) ctx.moveTo(xPix, yPix);
+    else ctx.lineTo(xPix, yPix);
+  });
+  ctx.stroke();
+
+  // T2 complet
+  ctx.strokeStyle = "#e94e77";
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  traj2.forEach((p, i) => {
+    const xPix = tToXPixel(p.t);
+    const yPix = xToYPixel(toRepere(p.s));
+    if (i === 0) ctx.moveTo(xPix, yPix);
+    else ctx.lineTo(xPix, yPix);
+  });
+  ctx.stroke();
+}
+
+// Reset complet de la simulation
+function resetSimulation() {
+  running = false;
+  lastTimestamp = null;
+  simTime = 0;
+  pointsT1 = [];
+  pointsT2 = [];
+  drawTrackScene();
+  drawGraphAxes();
+  drawGraphPoints();
+}
+
+// Animation frame
+function step(timestamp) {
+  if (!running) return;
+
+  if (!lastTimestamp) lastTimestamp = timestamp;
+  const deltaMs = timestamp - lastTimestamp;
+  lastTimestamp = timestamp;
+
+  // Avancement du temps simulé
+  const deltaHours = (deltaMs / 1000) * (speedFactor / 3600);
+  simTime += deltaHours;
+
+  // On limite à T_MAX pour le graphe
+  if (simTime > T_MAX) simTime = T_MAX;
+
+  // Ajout des nouveaux points si les trains sont "en route"
+  pointsT1.push({ t: simTime, s: s1(simTime) });
+  pointsT2.push({ t: simTime, s: s2(simTime) });
+
+  // Redessin
+  drawTrackScene();
+  drawGraphAxes();
+  drawGraphPoints();
+
+  // On continue tant qu'on n'a pas atteint T_MAX
+  if (simTime < T_MAX) {
+    requestAnimationFrame(step);
+  } else {
+    running = false;
+  }
+}
+
+// Gestion des boutons
+axisButton.addEventListener("click", () => {
+  // On change de repère, on recalcule les équations, on redessine le graphe
+  currentRepereIndex = (currentRepereIndex + 1) % repereOptions.length;
+  updateEquationsDisplay();
+  drawTrackScene();
+  drawGraphAxes();
+  drawGraphPoints();
+});
+
+playButton.addEventListener("click", () => {
+  if (!running && simTime < T_MAX) {
+    running = true;
+    lastTimestamp = null;
+    requestAnimationFrame(step);
+  }
+});
+
+pauseButton.addEventListener("click", () => {
+  running = false;
+});
+
+resetButton.addEventListener("click", () => {
+  resetSimulation();
+});
+
+graphButton.addEventListener("click", () => {
+  // Génère les trajectoires complètes dans le repère choisi
+  drawFullGraph();
+});
+
+// Initialisation
+updateEquationsDisplay();
+resetSimulation();
+
+</script>
+</body>
+</html>
