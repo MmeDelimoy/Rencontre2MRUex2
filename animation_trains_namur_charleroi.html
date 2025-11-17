@@ -115,17 +115,18 @@
   </div>
 
   <!-- Infos sur le repère et les équations -->
-  <!--
+  
   <div class="info-box">
     <h2>Repère choisi</h2>
     <div id="repereDescription"></div>
     <div class="small-note">
       On note <strong>t</strong> en heures, avec <strong>t = 0</strong> correspondant à 8h00.
     </div>
+    <!--
     <h2>Équations des mouvements (en fonction du repère choisi)</h2>
-    <div id="equations" class="equations"></div>
+    <div id="equations" class="equations"></div>  -->
   </div>
-  -->
+ 
 
   <!-- Graphique x(t) -->
   <div style="margin-top:14px;">
@@ -592,7 +593,7 @@ function step(timestamp) {
 axisButton.addEventListener("click", () => {
   // On change de repère, on recalcule les équations, on redessine le graphe
   currentRepereIndex = (currentRepereIndex + 1) % repereOptions.length;
-  updateEquationsDisplay();
+  //updateEquationsDisplay();
   drawTrackScene();
   drawGraphAxes();
   drawGraphPoints();
@@ -620,10 +621,11 @@ graphButton.addEventListener("click", () => {
 });
 
 // Initialisation
-updateEquationsDisplay();
+// updateEquationsDisplay();
 resetSimulation();
 
 </script>
 </body>
 </html>
+
 
